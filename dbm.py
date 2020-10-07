@@ -1,14 +1,11 @@
 import numpy as np
+from numpy import minimum, diagonal, newaxis
 import re
 
 MAX_INT = np.infty
 MIN_INT = -MAX_INT
 
 
-# def nt0(x):
-#     return np.nan_to_num(x, nan=0, posinf=np.infty, neginf=-np.infty)
-#
-#
 def safe_product(x, y):
     if x == 0 and abs(y) == np.infty or y == 0 and abs(x) == np.infty:
         return 0
@@ -18,9 +15,9 @@ def safe_product(x, y):
         return product
 
 
-def safe_diff(x, y):
-    if x == np.infty and y == np.infty:
-        return np.infty
+def safe_diff(x, y, err=np.infty):
+    if (x == np.infty and y == np.infty) or (x == -np.infty and y == -np.infty):
+        return err  # The value that makes the most sense changes on the context
     else:
         diff = x - y
         assert not np.isnan(diff)
@@ -59,6 +56,7 @@ class GuardHelper:
 
     def of(self, string):
         invariants = []
+        # TODO: allow guards of the form "x<y+10" etc. Consider allowing guards of the form "x<y+z" too
         for var, comp, const in re.findall("(\\w)([<>]?=?)(-?\\d+)", string):
             var = self.variables.index(var)
             const = int(const)
@@ -190,9 +188,6 @@ class DBM:
         candidate = np.minimum(first, second)
         candidate = DBM.tighten_bounds(candidate)
 
-        if DBM.unsatisfiable(candidate):
-            return None
-
         return candidate
 
     @staticmethod
@@ -240,6 +235,9 @@ class DBM:
 
         n_vars = DBM.ensure_compatible(dbm_in, scale, translate)
 
+        for i in range(n_vars):
+            assert scale[i, i] >= 0  # TODO: support negation by scaling
+
         # find new min and max values
         for var in range(n_vars):
             dbm_new[var + 1, 0] = -translate[var]
@@ -258,46 +256,54 @@ class DBM:
         for ls in range(n_vars):
             for rs in range(n_vars):
                 if ls == rs:
-                    dbm_new[ls + 1, rs + 1] = 0
+                    dbm_new[rs + 1, ls + 1] = 0
                     continue
 
-                start = dbm_in[ls + 1, rs + 1]
-                diff_ls_min = safe_diff(dbm_new[ls + 1, 0], dbm_in[ls + 1, 0])
+                start = dbm_in[rs + 1, ls + 1]
+                #diff_ls_min = safe_diff(dbm_new[ls + 1, 0], dbm_in[ls + 1, 0])
                 diff_ls_max = safe_diff(dbm_new[0, ls + 1], dbm_in[0, ls + 1])
-                diff_rs_min = safe_diff(dbm_new[rs + 1, 0], dbm_in[rs + 1, 0])
-                diff_rs_max = safe_diff(dbm_new[0, rs + 1], dbm_in[0, rs + 1])
+                # diff_rs_min = safe_diff(dbm_new[rs + 1, 0], dbm_in[rs + 1, 0])
+                diff_rs_min = -safe_diff(dbm_new[rs + 1, 0], dbm_in[rs + 1, 0])
 
-                diff = safe_diff(max(diff_ls_max, -diff_ls_min), max(diff_rs_max, -diff_rs_min))
+                # if diff_ls_max == np.infty:
+                #     if scale[ls, ls] <= 1:
+                #         pass  # TODO: look up the other values that were added to determine increase
+                #
+                # if diff_rs_min == -np.infty:
+                #     if scale[rs, rs] <= 1:
+                #         pass  # TODO: look up the other values that were added to determine decrease
 
-                dbm_new[ls + 1, rs + 1] = safe_diff(start, -diff)
+                #diff_rs_max = safe_diff(dbm_new[0, rs + 1], dbm_in[0, rs + 1])
 
-                assert not np.isnan(dbm_new[ls + 1, rs + 1])
+                # diff = safe_diff(max(diff_ls_max, -diff_ls_min), max(diff_rs_max, -diff_rs_min))
+                diff = safe_diff(diff_ls_max, diff_rs_min)
+
+                dbm_new[rs + 1, ls + 1] = safe_diff(start, -diff)  # 'safe' addition
+
+                assert not np.isnan(dbm_new[rs + 1, ls + 1])
 
         return DBM.tighten_bounds(dbm_new)
 
     @staticmethod
+    def floyd_warshall(dbm):
+        # from https://gist.github.com/mosco/11178777
+        # dbm[1:, 1:] = dbm[1:, 1:].transpose()
+        # dbm_in = np.copy(dbm)
+
+        dim = dbm.shape[0]
+
+        for k in range(dim):
+            dbm = minimum(dbm, dbm[newaxis, k, :] + dbm[:, k, newaxis])
+
+        if not (diagonal(dbm) == 0.0).all():  # if the diagonal is not zero, it is unsatisfiable
+            return None
+
+        # dbm[1:, 1:] = dbm[1:, 1:].transpose()
+        return dbm  # return for convenience
+
+    @staticmethod
     def tighten_bounds(dbm):
-        n_vars = dbm.shape[0]-1
-        for ls in range(n_vars):
-            for rs in range(n_vars):
-                if ls == rs:
-                    dbm[ls + 1, rs + 1] = 0
-                    continue
-
-                # tighten other invariants based on min and maxes
-                dbm[ls+1, rs+1] = min(safe_diff(dbm[0, ls + 1], -dbm[rs + 1, 0]), dbm[ls+1, rs+1])
-
-                d = dbm[ls+1, rs+1]
-
-                # tighten min and maxes based on other invariants
-                if abs(d) != np.infty:  # we can't tighten any if infty
-                    pass
-                    # ls max:
-                    dbm[0, ls+1] = min(dbm[0, ls+1], d + dbm[0, rs+1])
-                    # rs min:
-                    dbm[rs+1, 0] = min(dbm[rs+1, 0], d + dbm[ls+1, 0])  # -(-d - minx)
-
-        return dbm  # for convenience
+        return DBM.floyd_warshall(dbm)  # return it for convenience
 
     @staticmethod
     def convert_if_guard(maybe_guard):
@@ -306,14 +312,3 @@ class DBM:
         else:
             assert isinstance(maybe_guard, np.ndarray)
             return maybe_guard
-
-    @staticmethod
-    def unsatisfiable(candidate):
-        n_vars = candidate.shape[0]-1
-        for i in range(n_vars):
-            # minimum greater than maximum
-            if candidate[0, i+1] < -candidate[i+1, 0]:
-                return True
-
-        # TODO: check diagonals
-        return False
