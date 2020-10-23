@@ -41,6 +41,9 @@ class Automata:
         self.locations[initial_location].extend_zone(initial_zone)
         self.n_vars = initial_zone.shape[0] - 1
 
+        # keep track of locations with changes
+        self.dirty_locations = {self.initial_location}
+
         for transition in transitions:
             self.locations[transition[0]].add_transition(transition[1:])
             from_s, to_s, _, _ = transition
@@ -49,6 +52,12 @@ class Automata:
         # find all cycles and order them by length
         self.cycles = list(simple_cycles(self.graph))
         self.cycles.sort(key=len)
+
+        self.location_cycle_map = {i: [] for i in range(locations)}
+
+        for ind, cycle in enumerate(self.cycles):
+            for l in cycle:
+                self.location_cycle_map[l].append(ind)
 
         # find the transition (Guard and Transform) that is involved in each step of the cycle
         self.cycle_transitions = [[] for _ in range(len(self.cycles))]
@@ -76,21 +85,33 @@ class Automata:
             l.zone = z
 
     def post(self):
-        post_regions = [location.post() for location in self.locations]
+        # post_regions = [location.post() for location in self.locations]
+        post_regions = [self.locations[i].post() for i in self.dirty_locations]
         post_regions = [item for sublist in post_regions for item in sublist]
 
         zones = self.get_zones()  # this is a shallow copy
 
+        self.dirty_locations = set()
+
         for l, dbm in post_regions:
+            old = zones[l]
             zones[l] = DBM.union(zones[l], dbm)
 
-        return zones
+            #if there was a change mark the location dirty
+            if np.all(np.not_equal(old, zones[l])):
+                self.dirty_locations.add(l)
+        print(len(self.dirty_locations))
+        fixed = len(self.dirty_locations) == 0
+        return zones, fixed
 
     def post_star(self):
         zones = self.get_zones()  # this is a shallow copy
 
-        for cycle_id, cycle in enumerate(self.cycles):
-            for location in cycle:
+        # for cycle_id, cycle in enumerate(self.cycles):
+        #     for location in cycle:
+        for location in self.dirty_locations:
+            for cycle_id in self.location_cycle_map[location]:
+                cycle = self.cycles[cycle_id]
                 z0 = self.locations[location].zone
                 if z0 is None:
                     continue
@@ -109,7 +130,7 @@ class Automata:
 
         return zones
 
-    def REACH1(self, verbose=False):
+    def REACH1(self, verbose=False, reset_zones=True):
         fixed = False
         post = None
         s = time.time()
@@ -117,10 +138,11 @@ class Automata:
 
         while not fixed:
             k += 1
-            post = self.post()
 
             # Determine whether we reached a fix point
-            fixed = DBM.subset_all(post, self.get_zones())
+            post, fixed = self.post()
+            # fixed = DBM.subset_all(post, self.get_zones())
+
             self.set_zones(post)
 
         elapse = (time.time() - s)
@@ -134,6 +156,8 @@ class Automata:
 
             print(f"{elapse * 1000} ms")
             print(f"{k} iterations")
+        if reset_zones:
+            self.reset_zones()
         return post
 
     def take_cycle(self, cycle_id, start, dbm):
@@ -150,7 +174,7 @@ class Automata:
             result = DBM.transform(DBM.intersect(result, guard), transform)
         return result
 
-    def REACH2(self, verbose=False):
+    def REACH2(self, verbose=False, reset_zones=True):
         fixed = False
         post = None
         s = time.time()
@@ -162,8 +186,9 @@ class Automata:
             self.set_zones(p_star)
 
             # Determine whether we reached a fix point
-            post = self.post()
-            fixed = DBM.subset_all(post, self.get_zones())
+            post, fixed = self.post()
+            # fixed = DBM.subset_all(post, self.get_zones())
+
             self.set_zones(post)
 
         elapse = (time.time() - s)
@@ -177,5 +202,6 @@ class Automata:
 
             print(f"{elapse * 1000} ms")
             print(f"{k} iterations")
-
+        if reset_zones:
+            self.reset_zones()
         return post
