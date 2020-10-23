@@ -45,6 +45,9 @@ class Guard:
             # max
             self.dbm[0, v] = min(self.dbm[0, v], invariant.max)
 
+        self.dbm = DBM.tighten_bounds(self.dbm)
+
+
 class DBM:
     @staticmethod
     def print(dbm):
