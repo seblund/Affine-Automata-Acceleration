@@ -27,27 +27,6 @@ def safe_diff(x, y, err=np.infty):
 to_string = np.vectorize(lambda x: 'inf' if x >= MAX_INT else '-inf' if x <= MIN_INT else f"{x:.0f}")
 
 
-class Invariant:
-    def __init__(self, variable, maximum=MAX_INT, minimum=MIN_INT):
-        self.var = variable
-        self.max = maximum
-        self.min = minimum
-
-
-class Guard:
-    def __init__(self, n_variables, invariants):
-        self.dbm = DBM.new(n_variables)
-        for invariant in invariants:
-            v = invariant.var + 1
-            # min
-            self.dbm[v, 0] = min(self.dbm[v, 0], -invariant.min)
-
-            # max
-            self.dbm[0, v] = min(self.dbm[0, v], invariant.max)
-
-        self.dbm = DBM.tighten_bounds(self.dbm)
-
-
 class DBM:
     @staticmethod
     def print(dbm):
@@ -81,18 +60,17 @@ class DBM:
         return np.all(first <= second)
 
     @staticmethod
-    def union(first, second):
-        if first is None:
-            return second
+    def union(*dbms):
+        dbms = [dbm for dbm in dbms if dbm is not None]
+        n = len(dbms)
+        if n == 0:
+            return None
+        if n == 1:
+            return dbms[0]
 
-        if second is None:
-            return first
+        dbms = [DBM.convert_if_guard(dbm) for dbm in dbms]
 
-        # actually the convex hull of the union
-        first = DBM.convert_if_guard(first)
-        second = DBM.convert_if_guard(second)
-        assert first.shape == second.shape
-        return DBM.tighten_bounds(np.maximum(first, second))
+        return DBM.tighten_bounds(np.maximum.reduce(dbms))
 
     @staticmethod
     def intersect(first, second):
