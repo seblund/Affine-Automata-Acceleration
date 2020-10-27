@@ -53,6 +53,8 @@ class Automata:
         self.cycles = list(simple_cycles(self.graph))
         self.cycles.sort(key=len)
 
+        print(self.cycles)
+
         self.location_cycle_map = {i: [] for i in range(locations)}
 
         for ind, cycle in enumerate(self.cycles):
@@ -65,7 +67,7 @@ class Automata:
             loop = cycle + [cycle[0]]
             for i in range(len(cycle)):
                 # look up the guard and transform from state i to state i+1
-                gt = next(((g, t) for s_f, s_t, g, t in transitions if (s_f, s_t) == (loop[i], loop[i+1])))
+                gt = [(g, t) for s_f, s_t, g, t in transitions if (s_f, s_t) == (loop[i], loop[i+1])]
                 self.cycle_transitions[ind].append(gt)
 
         # Find the worst case bounds for completing any cycle i from any location l
@@ -100,7 +102,7 @@ class Automata:
             #if there was a change mark the location dirty
             if np.all(np.not_equal(old, zones[l])):
                 self.dirty_locations.add(l)
-        print(len(self.dirty_locations))
+
         fixed = len(self.dirty_locations) == 0
         return zones, fixed
 
@@ -167,12 +169,12 @@ class Automata:
         length = len(cycle)
         transitions = self.cycle_transitions[cycle_id]
 
-        result = dbm
+        results = [dbm]
         for i in range(length):
             index = (start+i) % length
-            guard, transform = transitions[index]
-            result = DBM.transform(DBM.intersect(result, guard), transform)
-        return result
+            for guard, transform in transitions[index]:
+                results = [DBM.transform(DBM.intersect(result, guard), transform) for result in results]
+        return DBM.union(*results)
 
     def REACH2(self, verbose=False, reset_zones=True):
         fixed = False
