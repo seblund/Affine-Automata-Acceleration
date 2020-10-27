@@ -11,11 +11,7 @@ class Node:
 
 
 def dependent_vars(node: Node, other):
-    a = node.r
-    b = node.w
-    c = other.w
-    d = node.r.union(node.w).intersection(other.w)
-    return node.r.union(node.w).intersection(other.w)
+    return node.r.intersection(other.w)
 
 
 def depends_on(node: Node, nodes):
