@@ -1,6 +1,8 @@
 from dbm import *
 import time
 from johnson import simple_cycles
+from helpers import PlaceholderTransform
+from typing import List, Any, Tuple
 
 
 class Location:
@@ -87,6 +89,8 @@ class Automata:
             l.zone = z
 
     def post(self):
+        print(self.dirty_locations)
+
         # post_regions = [location.post() for location in self.locations]
         post_regions = [self.locations[i].post() for i in self.dirty_locations]
         post_regions = [item for sublist in post_regions for item in sublist]
@@ -173,7 +177,7 @@ class Automata:
         for i in range(length):
             index = (start+i) % length
             for guard, transform in transitions[index]:
-                results = [DBM.transform(DBM.intersect(result, guard), transform) for result in results]
+                results = [DBM.transform(DBM.intersect(dbm, guard), transform) for dbm in results]
         return DBM.union(*results)
 
     def REACH2(self, verbose=False, reset_zones=True):
@@ -207,3 +211,31 @@ class Automata:
         if reset_zones:
             self.reset_zones()
         return post
+
+
+class PlaceholderAutomata:
+    def __init__(self, locations, ph_transitions: List[Tuple[Any, Any, Any, PlaceholderTransform]], initial_location):
+        self.locations = locations
+        self.ph_transitions = ph_transitions
+        self.initial_location = initial_location
+
+    def write_read_sets(self, global_vars):
+        global_vars = set(global_vars)
+        reads = set()
+        writes = set()
+        for _, _, ph_guard, ph_transform in self.ph_transitions:
+            w_t, r_t = ph_transform.write_read_sets()
+            r_g = ph_guard.read_set()
+
+            reads.update(r_t, r_g)
+            writes.update(w_t)
+
+        return writes.intersection(global_vars), reads.intersection(global_vars)
+
+    def initialize(self, variables, initial_zone):
+        transitions = []
+        for from_l, to_l, ph_guard, ph_transform in self.ph_transitions:
+            transition = (from_l, to_l, ph_guard.initialize(variables), ph_transform.initialize(variables))
+            transitions.append(transition)
+
+        return Automata(self.locations, transitions, initial_zone, self.initial_location)

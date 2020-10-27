@@ -201,6 +201,7 @@ class DBM:
 
     @staticmethod
     def convert_if_guard(maybe_guard):
+        from transition import Guard
         if isinstance(maybe_guard, Guard):
             return maybe_guard.dbm
         else:
